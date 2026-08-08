@@ -93,12 +93,23 @@
                     <h2 class="text-lg font-bold text-emerald-800">1. Define Target Audience</h2>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Enter Mobile Number(s)</label>
-                        <textarea id="target-numbers" rows="3" placeholder="+9627XXXXXXXX (Comma or newline separated)" class="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
+                        <textarea id="target-numbers" rows="3" oninput="updateCombinedAudiencePreview()" placeholder="+9627XXXXXXXX (Comma or newline separated)" class="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Or Upload Excel File (.xlsx, .xls)</label>
                         <input type="file" id="excel-file" accept=".xlsx, .xls" onchange="handleExcelUpload(event)" class="w-full border rounded-lg p-2 file:bg-gray-100 file:border-0 file:p-2 file:mr-4 file:rounded-lg file:cursor-pointer">
                         <p class="text-xs text-gray-500 mt-1">Excel file should contain numbers in the first column.</p>
+                    </div>
+
+                    <!-- Audience Preview Box -->
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs font-bold text-gray-700 uppercase tracking-wide">Target Audience Preview</span>
+                            <span id="audience-count" class="text-xs font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">0 numbers</span>
+                        </div>
+                        <div id="audience-preview-list" class="text-xs text-gray-600 font-mono max-h-28 overflow-y-auto bg-white p-2 border rounded">
+                            No numbers targeted yet.
+                        </div>
                     </div>
                 </div>
 
@@ -122,8 +133,8 @@
                 </div>
 
                 <div class="md:col-span-2 border-t pt-4 flex justify-end">
-                    <button onclick="sendMessages()" class="bg-emerald-600 text-white px-8 py-3 rounded-lg hover:bg-emerald-700 font-bold transition flex items-center gap-2">
-                        <i class="fa-brands fa-whatsapp text-xl"></i> Send WhatsApp Messages
+                    <button onclick="startSendingQueue()" class="bg-emerald-600 text-white px-8 py-3 rounded-lg hover:bg-emerald-700 font-bold transition flex items-center gap-2">
+                        <i class="fa-brands fa-whatsapp text-xl"></i> Start WhatsApp Broadcast Queue
                     </button>
                 </div>
             </div>
@@ -177,7 +188,10 @@
             document.getElementById(`tab-${tabId}`).classList.remove('hidden');
             document.getElementById(`nav-${tabId}`).classList.add('bg-emerald-800');
             
-            if(tabId === 'platform') updatePlatformDropdown();
+            if(tabId === 'platform') {
+                updatePlatformDropdown();
+                updateCombinedAudiencePreview();
+            }
             if(tabId === 'transactions') updateTransactionFilters();
         }
 
@@ -191,13 +205,11 @@
             const contentAr = document.getElementById('t-ar').value;
 
             if (id) {
-                // Edit mode
                 const index = templates.findIndex(t => t.id == id);
                 if (index > -1) {
                     templates[index] = { id: Number(id), category, title, contentEn, contentAr };
                 }
             } else {
-                // Create mode
                 const newTemplate = { id: Date.now(), category, title, contentEn, contentAr };
                 templates.push(newTemplate);
             }
@@ -255,7 +267,7 @@
             document.getElementById('form-title').innerText = "Create New Template";
         }
 
-        // --- PLATFORM LOGIC ---
+        // --- PLATFORM & QUEUE LOGIC ---
         function updatePlatformDropdown() {
             const select = document.getElementById('platform-template-select');
             select.innerHTML = '<option value="">-- Select Template --</option>';
@@ -276,6 +288,26 @@
             }
         }
 
+        function getCombinedNumbers() {
+            const manualInput = document.getElementById('target-numbers').value.trim();
+            let manualNumbers = manualInput ? manualInput.split(/[\n,]+/).map(n => n.trim()).filter(n => n) : [];
+            return [...new Set([...manualNumbers, ...uploadedNumbers])];
+        }
+
+        function updateCombinedAudiencePreview() {
+            const numbers = getCombinedNumbers();
+            const countBadge = document.getElementById('audience-count');
+            const previewContainer = document.getElementById('audience-preview-list');
+
+            countBadge.innerText = `${numbers.length} numbers`;
+            if (numbers.length === 0) {
+                previewContainer.innerHTML = 'No numbers targeted yet.';
+                return;
+            }
+
+            previewContainer.innerHTML = numbers.join('<br>');
+        }
+
         function handleExcelUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -289,15 +321,17 @@
                 
                 uploadedNumbers = [];
                 json.forEach(row => {
-                    if(row[0]) uploadedNumbers.push(String(row[0]).trim());
+                    if(row[0] !== undefined && row[0] !== null && String(row[0]).trim() !== '') {
+                        uploadedNumbers.push(String(row[0]).trim());
+                    }
                 });
+                updateCombinedAudiencePreview();
                 alert(`Successfully extracted ${uploadedNumbers.length} numbers from Excel file.`);
             };
             reader.readAsArrayBuffer(file);
         }
 
-        function sendMessages() {
-            const manualInput = document.getElementById('target-numbers').value.trim();
+        function startSendingQueue() {
             const templateId = document.getElementById('platform-template-select').value;
             const contentEn = document.getElementById('platform-content-en').value;
             const contentAr = document.getElementById('platform-content-ar').value;
@@ -307,9 +341,7 @@
                 return;
             }
 
-            let manualNumbers = manualInput ? manualInput.split(/[\n,]+/).map(n => n.trim()).filter(n => n) : [];
-            let allNumbers = [...new Set([...manualNumbers, ...uploadedNumbers])];
-
+            const allNumbers = getCombinedNumbers();
             if(allNumbers.length === 0) {
                 alert("Please provide at least one mobile number manually or upload an Excel file.");
                 return;
@@ -317,24 +349,29 @@
 
             const selectedTemplate = templates.find(t => t.id == templateId);
             
-            // Properly encode full UTF-8 strings (including emojis and Arabic characters) for URLs
+            // Fixed full UTF-8 Safe URI encoding ensuring emojis and Arabic text render correctly
             const rawMessage = `${contentEn}\n\n${contentAr}`;
-            const combinedMessage = encodeURIComponent(rawMessage).replace(/%0A/g, '%0A');
+            const encodedMessage = encodeURIComponent(rawMessage);
 
-            // Build queue data
+            // Populate the active queue list
             activeQueue = allNumbers.map(num => ({
                 mobile: num,
                 title: selectedTemplate.title,
-                message: combinedMessage
+                message: encodedMessage
             }));
 
-            runNextInQueue();
+            processQueueItem();
         }
 
-        function runNextInQueue() {
+        function processQueueItem() {
             if (activeQueue.length === 0) {
-                alert("All messages in the queue have been processed and logged!");
+                alert("All messages in the broadcast queue have been processed and logged!");
                 renderTransactions();
+                // Clear out entries
+                document.getElementById('target-numbers').value = '';
+                uploadedNumbers = [];
+                document.getElementById('excel-file').value = '';
+                updateCombinedAudiencePreview();
                 return;
             }
 
@@ -350,21 +387,21 @@
             });
             localStorage.setItem('wa_transactions', JSON.stringify(transactions));
 
-            // Open WhatsApp chat
+            // Open WhatsApp link for this individual recipient
             window.open(`https://wa.me/${cleanNumber}?text=${current.message}`, '_blank');
 
-            // Prompt sequence for the next chat
+            // Trigger prompt to advance queue safely
             setTimeout(() => {
-                if(confirm(`Chat opened for ${current.mobile}.\n\nClick OK to open the next chat in the queue (${activeQueue.length} remaining).`)) {
-                    runNextInQueue();
+                const remainingCount = activeQueue.length;
+                let userContinues = confirm(`Chat opened for: ${current.mobile}\n\nClick OK when you send this message to proceed to the next recipient (${remainingCount} remaining).`);
+                
+                if (userContinues) {
+                    processQueueItem();
+                } else {
+                    alert("Queue paused. You can restart or change settings anytime.");
+                    renderTransactions();
                 }
-            }, 500);
-
-            if(activeQueue.length === 0) {
-                document.getElementById('target-numbers').value = '';
-                uploadedNumbers = [];
-                document.getElementById('excel-file').value = '';
-            }
+            }, 600);
         }
 
         // --- TRANSACTIONS LOGIC ---
