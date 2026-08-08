@@ -152,9 +152,9 @@
                 <div class="flex justify-between items-center">
                     <div>
                         <h3 class="font-bold text-emerald-900 text-lg">Broadcast Queue Active</h3>
-                        <p id="queue-status-text" class="text-sm text-emerald-700">Remaining items in queue</p>
+                        <p id="queue-status-text" class="text-sm text-emerald-700">Track status for each recipient</p>
                     </div>
-                    <button onclick="cancelQueue()" class="text-red-600 hover:text-red-800 text-sm font-semibold">Cancel Queue</button>
+                    <button onclick="cancelQueue()" class="text-red-600 hover:text-red-800 text-sm font-semibold">Clear Queue</button>
                 </div>
                 
                 <!-- Queue List Table -->
@@ -166,6 +166,7 @@
                                     <th class="p-3">#</th>
                                     <th class="p-3">Mobile Number</th>
                                     <th class="p-3">Template Title</th>
+                                    <th class="p-3">Status Flag</th>
                                     <th class="p-3 text-right">Action</th>
                                 </tr>
                             </thead>
@@ -215,7 +216,6 @@
         let transactions = JSON.parse(localStorage.getItem('wa_transactions')) || [];
         let uploadedNumbers = [];
         let activeQueue = [];
-        let originalQueueLength = 0;
 
         function switchTab(tabId) {
             ['templates', 'platform', 'transactions'].forEach(t => {
@@ -429,10 +429,9 @@
                 id: idx + 1,
                 mobile: num,
                 title: selectedTemplate.title,
-                message: encodedMessage
+                message: encodedMessage,
+                sent: false // Sent flag initialized to false
             }));
-
-            originalQueueLength = activeQueue.length;
             
             document.getElementById('queue-runner-panel').classList.remove('hidden');
             renderQueueTable();
@@ -442,16 +441,11 @@
             const tbody = document.getElementById('queue-table-body');
             tbody.innerHTML = '';
 
-            document.getElementById('queue-status-text').innerText = `${activeQueue.length} items remaining in queue`;
+            const sentCount = activeQueue.filter(q => q.sent).length;
+            document.getElementById('queue-status-text').innerText = `Progress: ${sentCount} of ${activeQueue.length} messages sent`;
 
             if (activeQueue.length === 0) {
                 document.getElementById('queue-runner-panel').classList.add('hidden');
-                document.getElementById('target-numbers').value = '';
-                uploadedNumbers = [];
-                document.getElementById('excel-file').value = '';
-                updateCombinedAudiencePreview();
-                renderTransactions();
-                alert("All messages in the queue have been processed!");
                 return;
             }
 
@@ -459,14 +453,19 @@
                 const cleanNumber = item.mobile.replace(/[^0-9]/g, '');
                 const waLink = `https://api.whatsapp.com/send?phone=${cleanNumber}&text=${item.message}`;
 
+                const statusBadge = item.sent 
+                    ? `<span class="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full text-xs font-bold"><i class="fa-solid fa-check"></i> Sent</span>`
+                    : `<span class="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full text-xs font-bold"><i class="fa-solid fa-clock"></i> Pending</span>`;
+
                 tbody.innerHTML += `
                     <tr class="hover:bg-gray-50">
                         <td class="p-3 text-gray-500 font-mono">${index + 1}</td>
                         <td class="p-3 font-mono font-bold text-gray-800">${item.mobile}</td>
                         <td class="p-3 text-emerald-800 font-medium">${item.title}</td>
+                        <td class="p-3">${statusBadge}</td>
                         <td class="p-3 text-right">
-                            <a href="${waLink}" target="_blank" onclick="completeQueueItem(${item.id})" class="inline-flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 text-xs font-semibold transition">
-                                <i class="fa-brands fa-whatsapp"></i> Send Message
+                            <a href="${waLink}" target="_blank" onclick="markAsSent(${item.id})" class="inline-flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 text-xs font-semibold transition">
+                                <i class="fa-brands fa-whatsapp"></i> ${item.sent ? 'Resend' : 'Send Message'}
                             </a>
                         </td>
                     </tr>
@@ -474,12 +473,12 @@
             });
         }
 
-        function completeQueueItem(id) {
-            const itemIndex = activeQueue.findIndex(q => q.id === id);
-            if (itemIndex > -1) {
-                const item = activeQueue[itemIndex];
-                
-                // Add to transactions log
+        function markAsSent(id) {
+            const item = activeQueue.find(q => q.id === id);
+            if (item && !item.sent) {
+                item.sent = true;
+
+                // Add to transactions log history
                 const dateStr = new Date().toLocaleString();
                 transactions.unshift({
                     mobile: item.mobile,
@@ -488,10 +487,7 @@
                 });
                 localStorage.setItem('wa_transactions', JSON.stringify(transactions));
 
-                // Remove from active queue list
-                activeQueue.splice(itemIndex, 1);
-                
-                // Re-render table
+                // Re-render table to reflect flag status change immediately
                 setTimeout(() => {
                     renderQueueTable();
                 }, 300);
@@ -499,10 +495,13 @@
         }
 
         function cancelQueue() {
-            if(confirm("Are you sure you want to cancel the active broadcast queue?")) {
+            if(confirm("Are you sure you want to clear the active queue?")) {
                 activeQueue = [];
                 document.getElementById('queue-runner-panel').classList.add('hidden');
-                renderTransactions();
+                document.getElementById('target-numbers').value = '';
+                uploadedNumbers = [];
+                document.getElementById('excel-file').value = '';
+                updateCombinedAudiencePreview();
             }
         }
 
