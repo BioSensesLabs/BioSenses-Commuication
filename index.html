@@ -152,22 +152,27 @@
                 <div class="flex justify-between items-center">
                     <div>
                         <h3 class="font-bold text-emerald-900 text-lg">Broadcast Queue Active</h3>
-                        <p id="queue-status-text" class="text-sm text-emerald-700">Processing recipient 1 of X</p>
+                        <p id="queue-status-text" class="text-sm text-emerald-700">Remaining items in queue</p>
                     </div>
                     <button onclick="cancelQueue()" class="text-red-600 hover:text-red-800 text-sm font-semibold">Cancel Queue</button>
                 </div>
-                <div class="bg-white p-4 rounded-lg border border-emerald-100 flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div>
-                        <span class="text-xs text-gray-500 block">Current Target Number:</span>
-                        <span id="current-target-display" class="font-mono font-bold text-lg text-gray-900">--</span>
-                    </div>
-                    <div class="flex gap-3 w-full md:w-auto">
-                        <button onclick="openCurrentQueueChat()" class="bg-emerald-600 text-white px-5 py-2.5 rounded-lg hover:bg-emerald-700 font-medium transition flex items-center gap-2">
-                            <i class="fa-brands fa-whatsapp"></i> Open Chat Window
-                        </button>
-                        <button onclick="proceedToNextInQueue()" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-bold transition">
-                            Next Recipient &rarr;
-                        </button>
+                
+                <!-- Queue List Table -->
+                <div class="bg-white rounded-lg border border-emerald-100 overflow-hidden">
+                    <div class="overflow-x-auto max-h-80">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-50 text-gray-600 text-xs border-b">
+                                    <th class="p-3">#</th>
+                                    <th class="p-3">Mobile Number</th>
+                                    <th class="p-3">Template Title</th>
+                                    <th class="p-3 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="queue-table-body" class="divide-y divide-gray-100 text-sm">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -210,8 +215,7 @@
         let transactions = JSON.parse(localStorage.getItem('wa_transactions')) || [];
         let uploadedNumbers = [];
         let activeQueue = [];
-        let totalQueueLength = 0;
-        let currentQueueItem = null;
+        let originalQueueLength = 0;
 
         function switchTab(tabId) {
             ['templates', 'platform', 'transactions'].forEach(t => {
@@ -418,67 +422,85 @@
             }
 
             const selectedTemplate = templates.find(t => t.id == templateId);
-            
             const rawMessage = `${contentEn}\n\n${contentAr}`;
             const encodedMessage = encodeURIComponent(rawMessage);
 
-            activeQueue = allNumbers.map(num => ({
+            activeQueue = allNumbers.map((num, idx) => ({
+                id: idx + 1,
                 mobile: num,
                 title: selectedTemplate.title,
                 message: encodedMessage
             }));
 
-            totalQueueLength = activeQueue.length;
+            originalQueueLength = activeQueue.length;
             
             document.getElementById('queue-runner-panel').classList.remove('hidden');
-            loadNextQueueItem();
+            renderQueueTable();
         }
 
-        function loadNextQueueItem() {
+        function renderQueueTable() {
+            const tbody = document.getElementById('queue-table-body');
+            tbody.innerHTML = '';
+
+            document.getElementById('queue-status-text').innerText = `${activeQueue.length} items remaining in queue`;
+
             if (activeQueue.length === 0) {
-                alert("All messages in the queue have been fully processed!");
                 document.getElementById('queue-runner-panel').classList.add('hidden');
                 document.getElementById('target-numbers').value = '';
                 uploadedNumbers = [];
                 document.getElementById('excel-file').value = '';
                 updateCombinedAudiencePreview();
                 renderTransactions();
+                alert("All messages in the queue have been processed!");
                 return;
             }
 
-            currentQueueItem = activeQueue[0];
-            const processedCount = totalQueueLength - activeQueue.length + 1;
-            
-            document.getElementById('queue-status-text').innerText = `Processing recipient ${processedCount} of ${totalQueueLength} (${activeQueue.length} remaining)`;
-            document.getElementById('current-target-display').innerText = currentQueueItem.mobile;
-        }
+            activeQueue.forEach((item, index) => {
+                const cleanNumber = item.mobile.replace(/[^0-9]/g, '');
+                const waLink = `https://api.whatsapp.com/send?phone=${cleanNumber}&text=${item.message}`;
 
-        function openCurrentQueueChat() {
-            if (!currentQueueItem) return;
-            const cleanNumber = currentQueueItem.mobile.replace(/[^0-9]/g, '');
-            
-            window.open(`https://api.whatsapp.com/send?phone=${cleanNumber}&text=${currentQueueItem.message}`, '_blank');
-        }
-
-        function proceedToNextInQueue() {
-            if (!currentQueueItem) return;
-
-            const dateStr = new Date().toLocaleString();
-            transactions.unshift({
-                mobile: currentQueueItem.mobile,
-                title: currentQueueItem.title,
-                date: dateStr
+                tbody.innerHTML += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="p-3 text-gray-500 font-mono">${index + 1}</td>
+                        <td class="p-3 font-mono font-bold text-gray-800">${item.mobile}</td>
+                        <td class="p-3 text-emerald-800 font-medium">${item.title}</td>
+                        <td class="p-3 text-right">
+                            <a href="${waLink}" target="_blank" onclick="completeQueueItem(${item.id})" class="inline-flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 text-xs font-semibold transition">
+                                <i class="fa-brands fa-whatsapp"></i> Send Message
+                            </a>
+                        </td>
+                    </tr>
+                `;
             });
-            localStorage.setItem('wa_transactions', JSON.stringify(transactions));
+        }
 
-            activeQueue.shift();
-            loadNextQueueItem();
+        function completeQueueItem(id) {
+            const itemIndex = activeQueue.findIndex(q => q.id === id);
+            if (itemIndex > -1) {
+                const item = activeQueue[itemIndex];
+                
+                // Add to transactions log
+                const dateStr = new Date().toLocaleString();
+                transactions.unshift({
+                    mobile: item.mobile,
+                    title: item.title,
+                    date: dateStr
+                });
+                localStorage.setItem('wa_transactions', JSON.stringify(transactions));
+
+                // Remove from active queue list
+                activeQueue.splice(itemIndex, 1);
+                
+                // Re-render table
+                setTimeout(() => {
+                    renderQueueTable();
+                }, 300);
+            }
         }
 
         function cancelQueue() {
             if(confirm("Are you sure you want to cancel the active broadcast queue?")) {
                 activeQueue = [];
-                currentQueueItem = null;
                 document.getElementById('queue-runner-panel').classList.add('hidden');
                 renderTransactions();
             }
