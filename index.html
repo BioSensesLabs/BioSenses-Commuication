@@ -166,6 +166,7 @@
         let templates = JSON.parse(localStorage.getItem('wa_templates')) || [];
         let transactions = JSON.parse(localStorage.getItem('wa_transactions')) || [];
         let uploadedNumbers = [];
+        let activeQueue = [];
 
         // Tab Switching Mechanism
         function switchTab(tabId) {
@@ -316,28 +317,51 @@
 
             const selectedTemplate = templates.find(t => t.id == templateId);
             const combinedMessage = encodeURIComponent(`${contentEn}\n\n${contentAr}`);
+
+            // Build queue data
+            activeQueue = allNumbers.map(num => ({
+                mobile: num,
+                title: selectedTemplate.title,
+                message: combinedMessage
+            }));
+
+            runNextInQueue();
+        }
+
+        function runNextInQueue() {
+            if (activeQueue.length === 0) {
+                alert("All messages in the queue have been processed and logged!");
+                renderTransactions();
+                return;
+            }
+
+            const current = activeQueue.shift();
+            const cleanNumber = current.mobile.replace(/[^0-9]/g, '');
+
+            // Log transaction immediately
             const dateStr = new Date().toLocaleString();
-
-            // Register transaction logs
-            allNumbers.forEach(num => {
-                transactions.unshift({
-                    mobile: num,
-                    title: selectedTemplate.title,
-                    date: dateStr
-                });
+            transactions.unshift({
+                mobile: current.mobile,
+                title: current.title,
+                date: dateStr
             });
-
             localStorage.setItem('wa_transactions', JSON.stringify(transactions));
 
-            // Trigger WhatsApp Web / API for each number sequentially or opening the first one
-            // Note: Browsers block multiple window popups. We will open the first one and notify user.
-            alert(`Transactions logged successfully! Opening WhatsApp chat for the first target number.`);
-            window.open(`https://wa.me/${allNumbers[0].replace(/[^0-9]/g, '')}?text=${combinedMessage}`, '_blank');
-            
-            // Clear inputs
-            document.getElementById('target-numbers').value = '';
-            uploadedNumbers = [];
-            document.getElementById('excel-file').value = '';
+            // Open WhatsApp chat
+            window.open(`https://wa.me/${cleanNumber}?text=${current.message}`, '_blank');
+
+            // Prompt sequence for the next chat
+            setTimeout(() => {
+                if(confirm(`Chat opened for ${current.mobile}.\n\nClick OK to open the next chat in the queue (${activeQueue.length} remaining).`)) {
+                    runNextInQueue();
+                }
+            }, 500);
+
+            if(activeQueue.length === 0) {
+                document.getElementById('target-numbers').value = '';
+                uploadedNumbers = [];
+                document.getElementById('excel-file').value = '';
+            }
         }
 
         // --- TRANSACTIONS LOGIC ---
