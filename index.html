@@ -139,7 +139,7 @@
                 </div>
             </div>
 
-            <!-- Active Queue Runner Panel (Hidden by default until queue starts) -->
+            <!-- Active Queue Runner Panel -->
             <div id="queue-runner-panel" class="hidden bg-emerald-50 border border-emerald-200 p-6 rounded-xl shadow-sm space-y-4">
                 <div class="flex justify-between items-center">
                     <div>
@@ -374,7 +374,7 @@
 
             const selectedTemplate = templates.find(t => t.id == templateId);
             
-            // Hardened UTF-8 string conversion to eliminate emoji corruption
+            // Full multi-byte UTF-8 encoding configuration
             const rawMessage = `${contentEn}\n\n${contentAr}`;
             const encodedMessage = encodeURIComponent(rawMessage);
 
@@ -386,7 +386,6 @@
 
             totalQueueLength = activeQueue.length;
             
-            // Show queue runner panel
             document.getElementById('queue-runner-panel').classList.remove('hidden');
             loadNextQueueItem();
         }
@@ -403,7 +402,7 @@
                 return;
             }
 
-            currentQueueItem = activeQueue[0]; // Peek next item
+            currentQueueItem = activeQueue[0];
             const processedCount = totalQueueLength - activeQueue.length + 1;
             
             document.getElementById('queue-status-text').innerText = `Processing recipient ${processedCount} of ${totalQueueLength} (${activeQueue.length} remaining)`;
@@ -413,13 +412,14 @@
         function openCurrentQueueChat() {
             if (!currentQueueItem) return;
             const cleanNumber = currentQueueItem.mobile.replace(/[^0-9]/g, '');
-            window.open(`https://wa.me/${cleanNumber}?text=${currentQueueItem.message}`, '_blank');
+            
+            // Switched from wa.me redirect to official direct endpoint to bypass emoji stripping
+            window.open(`https://api.whatsapp.com/send?phone=${cleanNumber}&text=${currentQueueItem.message}`, '_blank');
         }
 
         function proceedToNextInQueue() {
             if (!currentQueueItem) return;
 
-            // Log transaction now that it's marked as sent/processed
             const dateStr = new Date().toLocaleString();
             transactions.unshift({
                 mobile: currentQueueItem.mobile,
@@ -428,10 +428,7 @@
             });
             localStorage.setItem('wa_transactions', JSON.stringify(transactions));
 
-            // Remove from active queue array
             activeQueue.shift();
-
-            // Load next item
             loadNextQueueItem();
         }
 
@@ -483,7 +480,6 @@
             });
         }
 
-        // Initial Page Load
         renderTemplates();
     </script>
 </body>
