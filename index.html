@@ -134,8 +134,33 @@
 
                 <div class="md:col-span-2 border-t pt-4 flex justify-end">
                     <button onclick="startSendingQueue()" class="bg-emerald-600 text-white px-8 py-3 rounded-lg hover:bg-emerald-700 font-bold transition flex items-center gap-2">
-                        <i class="fa-brands fa-whatsapp text-xl"></i> Start WhatsApp Broadcast Queue
+                        <i class="fa-brands fa-whatsapp text-xl"></i> Initialize Broadcast Queue
                     </button>
+                </div>
+            </div>
+
+            <!-- Active Queue Runner Panel (Hidden by default until queue starts) -->
+            <div id="queue-runner-panel" class="hidden bg-emerald-50 border border-emerald-200 p-6 rounded-xl shadow-sm space-y-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="font-bold text-emerald-900 text-lg">Broadcast Queue Active</h3>
+                        <p id="queue-status-text" class="text-sm text-emerald-700">Processing recipient 1 of X</p>
+                    </div>
+                    <button onclick="cancelQueue()" class="text-red-600 hover:text-red-800 text-sm font-semibold">Cancel Queue</button>
+                </div>
+                <div class="bg-white p-4 rounded-lg border border-emerald-100 flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div>
+                        <span class="text-xs text-gray-500 block">Current Target Number:</span>
+                        <span id="current-target-display" class="font-mono font-bold text-lg text-gray-900">--</span>
+                    </div>
+                    <div class="flex gap-3 w-full md:w-auto">
+                        <button onclick="openCurrentQueueChat()" class="bg-emerald-600 text-white px-5 py-2.5 rounded-lg hover:bg-emerald-700 font-medium transition flex items-center gap-2">
+                            <i class="fa-brands fa-whatsapp"></i> Open Chat Window
+                        </button>
+                        <button onclick="proceedToNextInQueue()" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 font-bold transition">
+                            Next Recipient &rarr;
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -173,13 +198,13 @@
 
     <!-- Application Script Logic -->
     <script>
-        // State Management stored in localStorage
         let templates = JSON.parse(localStorage.getItem('wa_templates')) || [];
         let transactions = JSON.parse(localStorage.getItem('wa_transactions')) || [];
         let uploadedNumbers = [];
         let activeQueue = [];
+        let totalQueueLength = 0;
+        let currentQueueItem = null;
 
-        // Tab Switching Mechanism
         function switchTab(tabId) {
             ['templates', 'platform', 'transactions'].forEach(t => {
                 document.getElementById(`tab-${t}`).classList.add('hidden');
@@ -349,59 +374,74 @@
 
             const selectedTemplate = templates.find(t => t.id == templateId);
             
-            // Fixed full UTF-8 Safe URI encoding ensuring emojis and Arabic text render correctly
+            // Hardened UTF-8 string conversion to eliminate emoji corruption
             const rawMessage = `${contentEn}\n\n${contentAr}`;
             const encodedMessage = encodeURIComponent(rawMessage);
 
-            // Populate the active queue list
             activeQueue = allNumbers.map(num => ({
                 mobile: num,
                 title: selectedTemplate.title,
                 message: encodedMessage
             }));
 
-            processQueueItem();
+            totalQueueLength = activeQueue.length;
+            
+            // Show queue runner panel
+            document.getElementById('queue-runner-panel').classList.remove('hidden');
+            loadNextQueueItem();
         }
 
-        function processQueueItem() {
+        function loadNextQueueItem() {
             if (activeQueue.length === 0) {
-                alert("All messages in the broadcast queue have been processed and logged!");
-                renderTransactions();
-                // Clear out entries
+                alert("All messages in the queue have been fully processed!");
+                document.getElementById('queue-runner-panel').classList.add('hidden');
                 document.getElementById('target-numbers').value = '';
                 uploadedNumbers = [];
                 document.getElementById('excel-file').value = '';
                 updateCombinedAudiencePreview();
+                renderTransactions();
                 return;
             }
 
-            const current = activeQueue.shift();
-            const cleanNumber = current.mobile.replace(/[^0-9]/g, '');
+            currentQueueItem = activeQueue[0]; // Peek next item
+            const processedCount = totalQueueLength - activeQueue.length + 1;
+            
+            document.getElementById('queue-status-text').innerText = `Processing recipient ${processedCount} of ${totalQueueLength} (${activeQueue.length} remaining)`;
+            document.getElementById('current-target-display').innerText = currentQueueItem.mobile;
+        }
 
-            // Log transaction immediately
+        function openCurrentQueueChat() {
+            if (!currentQueueItem) return;
+            const cleanNumber = currentQueueItem.mobile.replace(/[^0-9]/g, '');
+            window.open(`https://wa.me/${cleanNumber}?text=${currentQueueItem.message}`, '_blank');
+        }
+
+        function proceedToNextInQueue() {
+            if (!currentQueueItem) return;
+
+            // Log transaction now that it's marked as sent/processed
             const dateStr = new Date().toLocaleString();
             transactions.unshift({
-                mobile: current.mobile,
-                title: current.title,
+                mobile: currentQueueItem.mobile,
+                title: currentQueueItem.title,
                 date: dateStr
             });
             localStorage.setItem('wa_transactions', JSON.stringify(transactions));
 
-            // Open WhatsApp link for this individual recipient
-            window.open(`https://wa.me/${cleanNumber}?text=${current.message}`, '_blank');
+            // Remove from active queue array
+            activeQueue.shift();
 
-            // Trigger prompt to advance queue safely
-            setTimeout(() => {
-                const remainingCount = activeQueue.length;
-                let userContinues = confirm(`Chat opened for: ${current.mobile}\n\nClick OK when you send this message to proceed to the next recipient (${remainingCount} remaining).`);
-                
-                if (userContinues) {
-                    processQueueItem();
-                } else {
-                    alert("Queue paused. You can restart or change settings anytime.");
-                    renderTransactions();
-                }
-            }, 600);
+            // Load next item
+            loadNextQueueItem();
+        }
+
+        function cancelQueue() {
+            if(confirm("Are you sure you want to cancel the active broadcast queue?")) {
+                activeQueue = [];
+                currentQueueItem = null;
+                document.getElementById('queue-runner-panel').classList.add('hidden');
+                renderTransactions();
+            }
         }
 
         // --- TRANSACTIONS LOGIC ---
