@@ -48,11 +48,11 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Template Content (English)</label>
-                        <textarea id="t-en" rows="3" required placeholder="Hello, enjoy your discount..." class="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
+                        <textarea id="t-en" rows="3" required placeholder="Hello, enjoy your discount 🎉..." class="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">Template Content (Arabic)</label>
-                        <textarea id="t-ar" dir="rtl" rows="3" required placeholder="مرحباً، استمتع بالخصم..." class="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
+                        <textarea id="t-ar" dir="rtl" rows="3" required placeholder="مرحباً، استمتع بالخصم 🎉..." class="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
                     </div>
                     <div class="md:col-span-2 flex gap-3">
                         <button type="submit" class="bg-emerald-600 text-white px-5 py-2.5 rounded-lg hover:bg-emerald-700 font-medium transition">Save Template</button>
@@ -316,7 +316,10 @@
             }
 
             const selectedTemplate = templates.find(t => t.id == templateId);
-            const combinedMessage = encodeURIComponent(`${contentEn}\n\n${contentAr}`);
+            
+            // Properly encode full UTF-8 strings (including emojis and Arabic characters) for URLs
+            const rawMessage = `${contentEn}\n\n${contentAr}`;
+            const combinedMessage = encodeURIComponent(rawMessage).replace(/%0A/g, '%0A');
 
             // Build queue data
             activeQueue = allNumbers.map(num => ({
