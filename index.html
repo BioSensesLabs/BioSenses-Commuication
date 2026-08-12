@@ -210,66 +210,63 @@
 
     </main>
 
-    <!-- Firebase SDK Imports & Application Logic -->
+    <!-- Firebase Realtime Database SDK Imports & Application Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
         import { 
-            getFirestore, 
-            collection, 
-            addDoc, 
-            updateDoc, 
-            deleteDoc, 
-            doc, 
-            onSnapshot, 
-            query, 
-            orderBy, 
-            serverTimestamp 
-        } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+            getDatabase, 
+            ref, 
+            push, 
+            set, 
+            update, 
+            remove, 
+            onValue 
+        } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCy02PlXuB3TUc3OolcXaZr8L-dgEMCfX0",
             authDomain: "biosenses-communication.firebaseapp.com",
+            databaseURL: "https://biosenses-communication-default-rtdb.firebaseio.com",
             projectId: "biosenses-communication",
             storageBucket: "biosenses-communication.firebasestorage.app",
             messagingSenderId: "708284582140",
             appId: "1:708284582140:web:7495208844b935506faf79"
         };
-        
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getDatabase(app);
 
         let templates = [];
         let transactions = [];
         let uploadedNumbers = [];
         let activeQueue = [];
 
-        // --- REALTIME FIRESTORE LISTENERS ---
-        const templatesRef = collection(db, "templates");
-        onSnapshot(templatesRef, (snapshot) => {
+        // --- REALTIME DATABASE LISTENERS ---
+        const templatesRef = ref(db, 'templates');
+        onValue(templatesRef, (snapshot) => {
+            const data = snapshot.val();
             templates = [];
-            snapshot.forEach((docSnap) => {
-                templates.push({ id: docSnap.id, ...docSnap.data() });
-            });
+            if (data) {
+                Object.keys(data).forEach(key => {
+                    templates.push({ id: key, ...data[key] });
+                });
+            }
             renderTemplates();
             if (!document.getElementById('tab-platform').classList.contains('hidden')) {
                 onPlatformCategoryChange();
             }
         });
 
-        const transactionsRef = collection(db, "transactions");
-        const txQuery = query(transactionsRef, orderBy("createdAt", "desc"));
-        onSnapshot(txQuery, (snapshot) => {
+        const transactionsRef = ref(db, 'transactions');
+        onValue(transactionsRef, (snapshot) => {
+            const data = snapshot.val();
             transactions = [];
-            snapshot.forEach((docSnap) => {
-                const data = docSnap.data();
-                transactions.push({
-                    id: docSnap.id,
-                    mobile: data.mobile,
-                    title: data.title,
-                    date: data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()
+            if (data) {
+                Object.keys(data).forEach(key => {
+                    transactions.push({ id: key, ...data[key] });
                 });
-            });
+                transactions.reverse(); // Latest first
+            }
             renderTransactions();
         });
 
@@ -300,18 +297,19 @@
 
             try {
                 if (id) {
-                    await updateDoc(doc(db, "templates", id), {
+                    await update(ref(db, `templates/${id}`), {
                         category, title, contentEn, contentAr
                     });
                 } else {
-                    await addDoc(collection(db, "templates"), {
-                        category, title, contentEn, contentAr, createdAt: serverTimestamp()
+                    const newRef = push(ref(db, 'templates'));
+                    await set(newRef, {
+                        category, title, contentEn, contentAr, createdAt: Date.now()
                     });
                 }
                 resetTemplateForm();
             } catch (err) {
                 console.error("Error saving template: ", err);
-                alert("Error saving template to Firestore.");
+                alert("Error saving template to Realtime Database.");
             }
         };
 
@@ -352,7 +350,7 @@
         window.deleteTemplate = async function(id) {
             if(confirm("Are you sure you want to delete this template?")) {
                 try {
-                    await deleteDoc(doc(db, "templates", id));
+                    await remove(ref(db, `templates/${id}`));
                 } catch(err) {
                     console.error("Error deleting template: ", err);
                 }
@@ -540,10 +538,11 @@
                 item.sent = true;
 
                 try {
-                    await addDoc(collection(db, "transactions"), {
+                    const newTxRef = push(ref(db, 'transactions'));
+                    await set(newTxRef, {
                         mobile: item.mobile,
                         title: item.title,
-                        createdAt: serverTimestamp()
+                        date: new Date().toLocaleString()
                     });
                 } catch(err) {
                     console.error("Error logging transaction: ", err);
