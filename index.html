@@ -210,14 +210,70 @@
 
     </main>
 
-    <!-- Application Script Logic -->
-    <script>
-        let templates = JSON.parse(localStorage.getItem('wa_templates')) || [];
-        let transactions = JSON.parse(localStorage.getItem('wa_transactions')) || [];
+    <!-- Firebase SDK Imports & Application Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+        import { 
+            getFirestore, 
+            collection, 
+            addDoc, 
+            updateDoc, 
+            deleteDoc, 
+            doc, 
+            onSnapshot, 
+            query, 
+            orderBy, 
+            serverTimestamp 
+        } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCy02PlXuB3TUc3OolcXaZr8L-dgEMCfX0",
+            authDomain: "biosenses-communication.firebaseapp.com",
+            projectId: "biosenses-communication",
+            storageBucket: "biosenses-communication.firebasestorage.app",
+            messagingSenderId: "708284582140",
+            appId: "1:708284582140:web:7495208844b935506faf79"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let templates = [];
+        let transactions = [];
         let uploadedNumbers = [];
         let activeQueue = [];
 
-        function switchTab(tabId) {
+        // --- REALTIME FIRESTORE LISTENERS ---
+        const templatesRef = collection(db, "templates");
+        onSnapshot(templatesRef, (snapshot) => {
+            templates = [];
+            snapshot.forEach((docSnap) => {
+                templates.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            renderTemplates();
+            if (!document.getElementById('tab-platform').classList.contains('hidden')) {
+                onPlatformCategoryChange();
+            }
+        });
+
+        const transactionsRef = collection(db, "transactions");
+        const txQuery = query(transactionsRef, orderBy("createdAt", "desc"));
+        onSnapshot(txQuery, (snapshot) => {
+            transactions = [];
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                transactions.push({
+                    id: docSnap.id,
+                    mobile: data.mobile,
+                    title: data.title,
+                    date: data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()
+                });
+            });
+            renderTransactions();
+        });
+
+        // --- NAVIGATION LOGIC ---
+        window.switchTab = function(tabId) {
             ['templates', 'platform', 'transactions'].forEach(t => {
                 document.getElementById(`tab-${t}`).classList.add('hidden');
                 document.getElementById(`nav-${t}`).classList.remove('bg-emerald-800');
@@ -230,10 +286,10 @@
                 updateCombinedAudiencePreview();
             }
             if(tabId === 'transactions') updateTransactionFilters();
-        }
+        };
 
         // --- TEMPLATES LOGIC ---
-        function saveTemplate(e) {
+        window.saveTemplate = async function(e) {
             e.preventDefault();
             const id = document.getElementById('template-id').value;
             const category = document.getElementById('t-category').value;
@@ -241,22 +297,24 @@
             const contentEn = document.getElementById('t-en').value;
             const contentAr = document.getElementById('t-ar').value;
 
-            if (id) {
-                const index = templates.findIndex(t => t.id == id);
-                if (index > -1) {
-                    templates[index] = { id: Number(id), category, title, contentEn, contentAr };
+            try {
+                if (id) {
+                    await updateDoc(doc(db, "templates", id), {
+                        category, title, contentEn, contentAr
+                    });
+                } else {
+                    await addDoc(collection(db, "templates"), {
+                        category, title, contentEn, contentAr, createdAt: serverTimestamp()
+                    });
                 }
-            } else {
-                const newTemplate = { id: Date.now(), category, title, contentEn, contentAr };
-                templates.push(newTemplate);
+                resetTemplateForm();
+            } catch (err) {
+                console.error("Error saving template: ", err);
+                alert("Error saving template to Firestore.");
             }
+        };
 
-            localStorage.setItem('wa_templates', JSON.stringify(templates));
-            resetTemplateForm();
-            renderTemplates();
-        }
-
-        function renderTemplates() {
+        window.renderTemplates = function() {
             const tbody = document.getElementById('templates-table-body');
             tbody.innerHTML = '';
             if (templates.length === 0) {
@@ -271,15 +329,15 @@
                         <td class="p-4 text-gray-600 truncate max-w-xs">${t.contentEn}</td>
                         <td class="p-4 text-gray-600 truncate max-w-xs" dir="rtl">${t.contentAr}</td>
                         <td class="p-4 text-right space-x-2">
-                            <button onclick="editTemplate(${t.id})" class="text-blue-600 hover:text-blue-800"><i class="fa-solid fa-pen"></i></button>
-                            <button onclick="deleteTemplate(${t.id})" class="text-red-600 hover:text-red-800"><i class="fa-solid fa-trash"></i></button>
+                            <button onclick="editTemplate('${t.id}')" class="text-blue-600 hover:text-blue-800"><i class="fa-solid fa-pen"></i></button>
+                            <button onclick="deleteTemplate('${t.id}')" class="text-red-600 hover:text-red-800"><i class="fa-solid fa-trash"></i></button>
                         </td>
                     </tr>
                 `;
             });
-        }
+        };
 
-        function editTemplate(id) {
+        window.editTemplate = function(id) {
             const t = templates.find(item => item.id === id);
             if (!t) return;
             document.getElementById('template-id').value = t.id;
@@ -288,24 +346,26 @@
             document.getElementById('t-en').value = t.contentEn;
             document.getElementById('t-ar').value = t.contentAr;
             document.getElementById('form-title').innerText = "Edit Template";
-        }
+        };
 
-        function deleteTemplate(id) {
+        window.deleteTemplate = async function(id) {
             if(confirm("Are you sure you want to delete this template?")) {
-                templates = templates.filter(t => t.id !== id);
-                localStorage.setItem('wa_templates', JSON.stringify(templates));
-                renderTemplates();
+                try {
+                    await deleteDoc(doc(db, "templates", id));
+                } catch(err) {
+                    console.error("Error deleting template: ", err);
+                }
             }
-        }
+        };
 
-        function resetTemplateForm() {
+        window.resetTemplateForm = function() {
             document.getElementById('template-form').reset();
             document.getElementById('template-id').value = '';
             document.getElementById('form-title').innerText = "Create New Template";
-        }
+        };
 
         // --- PLATFORM & QUEUE LOGIC ---
-        function resetPlatformCategorySelection() {
+        window.resetPlatformCategorySelection = function() {
             document.getElementById('platform-category-select').value = "";
             const templateSelect = document.getElementById('platform-template-select');
             templateSelect.innerHTML = '<option value="">-- Select Category First --</option>';
@@ -313,9 +373,9 @@
             templateSelect.classList.add('bg-gray-100', 'cursor-not-allowed');
             document.getElementById('platform-content-en').value = '';
             document.getElementById('platform-content-ar').value = '';
-        }
+        };
 
-        function onPlatformCategoryChange() {
+        window.onPlatformCategoryChange = function() {
             const selectedCategory = document.getElementById('platform-category-select').value;
             const templateSelect = document.getElementById('platform-template-select');
             
@@ -342,9 +402,9 @@
             filteredTemplates.forEach(t => {
                 templateSelect.innerHTML += `<option value="${t.id}">${t.title}</option>`;
             });
-        }
+        };
 
-        function loadTemplateIntoPlatform() {
+        window.loadTemplateIntoPlatform = function() {
             const id = document.getElementById('platform-template-select').value;
             const t = templates.find(item => item.id == id);
             if(t) {
@@ -354,7 +414,7 @@
                 document.getElementById('platform-content-en').value = '';
                 document.getElementById('platform-content-ar').value = '';
             }
-        }
+        };
 
         function getCombinedNumbers() {
             const manualInput = document.getElementById('target-numbers').value.trim();
@@ -362,7 +422,7 @@
             return [...new Set([...manualNumbers, ...uploadedNumbers])];
         }
 
-        function updateCombinedAudiencePreview() {
+        window.updateCombinedAudiencePreview = function() {
             const numbers = getCombinedNumbers();
             const countBadge = document.getElementById('audience-count');
             const previewContainer = document.getElementById('audience-preview-list');
@@ -374,9 +434,9 @@
             }
 
             previewContainer.innerHTML = numbers.join('<br>');
-        }
+        };
 
-        function handleExcelUpload(event) {
+        window.handleExcelUpload = function(event) {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
@@ -397,9 +457,9 @@
                 alert(`Successfully extracted ${uploadedNumbers.length} numbers from Excel file.`);
             };
             reader.readAsArrayBuffer(file);
-        }
+        };
 
-        function startSendingQueue() {
+        window.startSendingQueue = function() {
             const category = document.getElementById('platform-category-select').value;
             const templateId = document.getElementById('platform-template-select').value;
             const contentEn = document.getElementById('platform-content-en').value;
@@ -428,14 +488,14 @@
             activeQueue = allNumbers.map((num, idx) => ({
                 id: idx + 1,
                 mobile: num,
-                title: selectedTemplate.title,
+                title: selectedTemplate ? selectedTemplate.title : "Custom Message",
                 message: encodedMessage,
-                sent: false // Sent flag initialized to false
+                sent: false
             }));
             
             document.getElementById('queue-runner-panel').classList.remove('hidden');
             renderQueueTable();
-        }
+        };
 
         function renderQueueTable() {
             const tbody = document.getElementById('queue-table-body');
@@ -473,28 +533,28 @@
             });
         }
 
-        function markAsSent(id) {
+        window.markAsSent = async function(id) {
             const item = activeQueue.find(q => q.id === id);
             if (item && !item.sent) {
                 item.sent = true;
 
-                // Add to transactions log history
-                const dateStr = new Date().toLocaleString();
-                transactions.unshift({
-                    mobile: item.mobile,
-                    title: item.title,
-                    date: dateStr
-                });
-                localStorage.setItem('wa_transactions', JSON.stringify(transactions));
+                try {
+                    await addDoc(collection(db, "transactions"), {
+                        mobile: item.mobile,
+                        title: item.title,
+                        createdAt: serverTimestamp()
+                    });
+                } catch(err) {
+                    console.error("Error logging transaction: ", err);
+                }
 
-                // Re-render table to reflect flag status change immediately
                 setTimeout(() => {
                     renderQueueTable();
                 }, 300);
             }
-        }
+        };
 
-        function cancelQueue() {
+        window.cancelQueue = function() {
             if(confirm("Are you sure you want to clear the active queue?")) {
                 activeQueue = [];
                 document.getElementById('queue-runner-panel').classList.add('hidden');
@@ -503,7 +563,7 @@
                 document.getElementById('excel-file').value = '';
                 updateCombinedAudiencePreview();
             }
-        }
+        };
 
         // --- TRANSACTIONS LOGIC ---
         function updateTransactionFilters() {
@@ -515,7 +575,7 @@
             renderTransactions();
         }
 
-        function renderTransactions() {
+        window.renderTransactions = function() {
             const tbody = document.getElementById('transactions-table-body');
             const searchVal = document.getElementById('search-tx').value.toLowerCase();
             const filterVal = document.getElementById('filter-tx').value;
@@ -542,9 +602,7 @@
                     </tr>
                 `;
             });
-        }
-
-        renderTemplates();
+        };
     </script>
 </body>
 </html>
